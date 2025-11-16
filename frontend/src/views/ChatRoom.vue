@@ -101,7 +101,7 @@ const scrollToBottom = () => {
 const initWebSocket = () => {
   const token = localStorage.getItem('token')
   if (!token) return
-  const wsUrl = `ws://192.168.0.134:8080/ws/chat?token=${token}`
+  const wsUrl = `ws://192.168.0.134:8080/ws/chat?token=${token}&groupId=${groupId}`
   ws.value = new WebSocket(wsUrl)
   ws.value.onopen = () => {
     wsConnected.value = true

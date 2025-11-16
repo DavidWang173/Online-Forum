@@ -31,7 +31,15 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        String token = getTokenFromQueryParams(session);
+        Map<String, String> queryParams = getQueryParams(session);
+        String token = queryParams.get("token");
+        String groupIdStr = queryParams.get("groupId");
+
+        if (token == null || groupIdStr == null) {
+            session.close();
+            return;
+        }
+
         Map<String, Object> claims = JwtUtil.parseToken(token);
 
         if (claims == null || !claims.containsKey("userId")) {
@@ -40,16 +48,25 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
 
         Long userId = ((Number) claims.get("userId")).longValue();
+        Long groupId = Long.parseLong(groupIdStr);
         session.getAttributes().put("userId", userId);
+        session.getAttributes().put("groupId", groupId);
+
+        addSessionToGroup(groupId, session);
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         Long userId = (Long) session.getAttributes().get("userId");
+        Long groupId = (Long) session.getAttributes().get("groupId");
 
         // 1. 解析客户端消息
         GroupMessageRequest request = objectMapper.readValue(message.getPayload(), GroupMessageRequest.class);
         request.setSenderId(userId);
+        if (groupId != null) {
+            request.setGroupId(groupId);
+            addSessionToGroup(groupId, session);
+        }
 
         // 2. 存入数据库 + 获取完整 DTO（含头像、昵称）
         GroupMessageDTO fullMessage = groupMessageService.saveGroupMessage(request);
@@ -76,19 +93,27 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    private void addSessionToGroup(Long groupId, WebSocketSession session) {
+        if (groupId == null) {
+            return;
+        }
+        groupSessions.computeIfAbsent(groupId, k -> ConcurrentHashMap.newKeySet()).add(session);
+    }
+
     /**
-     * 从 WebSocket 握手 URI 的查询参数中解析 token，如 ws://localhost:8080/ws/chat?token=xxx
+     * 从 WebSocket 握手 URI 的查询参数中解析键值对
      */
-    private String getTokenFromQueryParams(WebSocketSession session) {
-        String query = session.getUri().getQuery(); // 例如 token=abc123
+    private Map<String, String> getQueryParams(WebSocketSession session) {
+        Map<String, String> params = new HashMap<>();
+        String query = session.getUri().getQuery();
         if (query != null) {
             for (String param : query.split("&")) {
                 String[] parts = param.split("=");
-                if (parts.length == 2 && parts[0].equals("token")) {
-                    return parts[1];
+                if (parts.length == 2) {
+                    params.put(parts[0], parts[1]);
                 }
             }
         }
-        return null;
+        return params;
     }
 }
